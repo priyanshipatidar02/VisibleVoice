@@ -2,15 +2,12 @@ import torch
 import torch.nn as nn
 
 
-class Encoder(nn.Module):
+# ============================================================
+# Encoder
+# ============================================================
 
-    def __init__(
-        self,
-        input_size=36,
-        hidden_size=128,
-        num_layers=2,
-        dropout=0.2,
-    ):
+class Encoder(nn.Module):
+    def __init__(self,input_size=422,hidden_size=128,num_layers=2,dropout=0.2):
         super().__init__()
 
         self.input_projection = nn.Linear(
@@ -31,10 +28,13 @@ class Encoder(nn.Module):
 
     def forward(self, x, lengths):
 
-        # x: (B, T, 36)
+        # x:
+        # (B, T, 420)
 
         x = self.input_projection(x)
 
+        # Pack variable-length sequences so the LSTM
+        # does not process padded frames.
         packed = nn.utils.rnn.pack_padded_sequence(
             x,
             lengths.cpu(),
@@ -53,9 +53,16 @@ class Encoder(nn.Module):
 
         # outputs:
         # (B, T, hidden_size * 2)
+        #
+        # With hidden_size=128:
+        # (B, T, 256)
 
         return outputs, hidden, cell
 
+
+# ============================================================
+# Attention
+# ============================================================
 
 class Attention(nn.Module):
 
@@ -138,6 +145,10 @@ class Attention(nn.Module):
         return context, attention_weights
 
 
+# ============================================================
+# Decoder
+# ============================================================
+
 class Decoder(nn.Module):
 
     def __init__(
@@ -172,7 +183,9 @@ class Decoder(nn.Module):
             vocab_size
         )
 
-        self.dropout = nn.Dropout(dropout)
+        self.dropout = nn.Dropout(
+            dropout
+        )
 
     def forward(
         self,
@@ -240,18 +253,12 @@ class Decoder(nn.Module):
         )
 
 
-class SignToSentenceModel(nn.Module):
+# ============================================================
+# Sign → Sentence Model
+# ============================================================
 
-    def __init__(
-        self,
-        vocab_size,
-        input_size=36,
-        encoder_hidden_size=128,
-        encoder_layers=2,
-        decoder_hidden_size=256,
-        embedding_dim=256,
-        dropout=0.2,
-    ):
+class SignToSentenceModel(nn.Module):
+    def __init__(self,vocab_size,input_size=422,encoder_hidden_size=128,encoder_layers=2,decoder_hidden_size=256,embedding_dim=256,dropout=0.2):
         super().__init__()
 
         self.encoder = Encoder(
@@ -307,10 +314,7 @@ class SignToSentenceModel(nn.Module):
             )
         )
 
-        # The bidirectional encoder has twice the
-        # hidden dimension of a single decoder layer.
-        # Combine forward and backward states.
-
+        # Combine forward and backward encoder states.
         hidden = self._prepare_decoder_state(
             encoder_hidden
         )
@@ -361,7 +365,7 @@ class SignToSentenceModel(nn.Module):
         # Encoder state:
         # (encoder_layers * 2, B, encoder_hidden)
 
-        # Decoder state needs:
+        # Decoder state:
         # (decoder_layers, B, decoder_hidden)
 
         batch_size = state.shape[1]
@@ -375,6 +379,7 @@ class SignToSentenceModel(nn.Module):
 
         # Take the final encoder layer.
         forward_state = state[-1, 0]
+
         backward_state = state[-1, 1]
 
         combined = torch.cat(
@@ -385,12 +390,17 @@ class SignToSentenceModel(nn.Module):
             dim=1
         )
 
-        # Encoder combined size = 256.
-        # Decoder hidden size = 256.
+        # Combined:
+        # 128 + 128 = 256
+
         combined = combined.unsqueeze(0)
 
         return combined
 
+
+# ============================================================
+# Forward-pass test
+# ============================================================
 
 if __name__ == "__main__":
 
@@ -404,14 +414,12 @@ if __name__ == "__main__":
     sequence_length = 162
     target_length = 19
 
-    source = torch.randn(
-        batch_size,
-        sequence_length,
-        36
-    )
+    # IMPORTANT:
+    # The new dataset produces 422 features/frame.
+    source=torch.randn(batch_size,sequence_length,422)
 
     source_lengths = torch.tensor(
-        [12, 62, 162, 88],
+        [162, 120, 90, 60],
         dtype=torch.long
     )
 
@@ -440,7 +448,11 @@ if __name__ == "__main__":
         teacher_forcing_ratio=1.0
     )
 
-    print("Source shape:")
+    print("=" * 60)
+    print("VISIBLEVOICE - 422-FEATURE MODEL TEST")
+    print("=" * 60)
+
+    print("\nSource shape:")
     print(source.shape)
 
     print("\nTarget shape:")
@@ -451,5 +463,8 @@ if __name__ == "__main__":
 
     print("\nExpected:")
     print(
-        f"(batch_size, target_length, vocab_size)"
+        f"({batch_size}, {target_length}, {VOCAB_SIZE})"
     )
+
+    print("\n✓ Forward pass successful")
+    print("=" * 60)
